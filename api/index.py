@@ -1,14 +1,15 @@
+import os
 import asyncio
-import time
+from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
 from aiogram.types import Update
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-from aiohttp import web
 from answer_module import SkyAnswers
+import time
 
-import os
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN not set")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -46,10 +47,7 @@ async def handle_link(message: types.Message):
         
         question = task['question'].strip()
         if question:
-            suffix = ""
-            if not (question.endswith("?") or question.endswith("!") or 
-                    any(word in question.lower() for word in ["выбери", "выбрать", "запиши", "напиши", "вычеркни", "соотнеси", "выполни"])):
-                suffix = " — выбери правильный ответ или запиши ответ"
+            suffix = " — выбери правильный ответ или запиши ответ" if not (question.endswith("?") or question.endswith("!") or any(word in question.lower() for word in ["выбери", "выбрать", "запиши", "напиши", "вычеркни", "соотнеси", "выполни"])) else ""
             question_part = f"\n<i>{question}{suffix}</i>"
         else:
             question_part = ""
@@ -57,23 +55,12 @@ async def handle_link(message: types.Message):
         answers_part = ""
         if task['answers']:
             ans_list = [a.strip() for a in task['answers'] if a.strip()]
-            
             if any("File upload" in a for a in ans_list):
                 answers_part = "\n⚠️ <b>Требуется загрузка файла</b>"
-            
             elif len(ans_list) % 2 == 0 and all("→" not in a for a in ans_list):
-                formatted = []
-                i = 0
-                while i < len(ans_list) - 1:
-                    left = ans_list[i]
-                    right = ans_list[i + 1]
-                    formatted.append(f"<b>{left}</b> → {right}")
-                    i += 2
-                answers_part = "\n" + "\n".join(formatted)
-            
+                answers_part = "\n" + "\n".join(f"<b>{ans_list[i]}</b> → {ans_list[i+1]}" for i in range(0, len(ans_list)-1, 2))
             elif "вычеркни" in question.lower():
                 answers_part = "\nВычеркнуть:\n" + "\n".join(f"❌ {ans}" for ans in ans_list)
-            
             else:
                 answers_part = "\n" + "\n".join(f"✅ {ans}" for ans in ans_list)
         else:
@@ -83,10 +70,10 @@ async def handle_link(message: types.Message):
         await message.answer(full_text, parse_mode="HTML")
         await asyncio.sleep(0.3)
 
-app = web.Application()
-SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path="/webhook")
-setup_application(app, dp, bot=bot)
+app = FastAPI()
 
-if __name__ == "__main__":
-
-    web.run_app(app, host="0.0.0.0", port=8000)
+@app.post("/")
+async def webhook(request: Request):
+    update = Update.model_validate(await request.json(), context={"bot": bot})
+    await dp.feed_update(bot=bot, update=update)
+    return {"ok": True}
