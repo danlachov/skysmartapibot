@@ -7,7 +7,8 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 from aiohttp import web
 from answer_module import SkyAnswers
 
-BOT_TOKEN = "8233085354:AAGXZ1GPyiDVW-wG3_Yj_DP_cuahx9PFrsw"  # Лучше в env Vercel
+import os
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -87,4 +88,5 @@ SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path="/webhook")
 setup_application(app, dp, bot=bot)
 
 if __name__ == "__main__":
+
     web.run_app(app, host="0.0.0.0", port=8000)
