@@ -5,7 +5,7 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
 from answer_module import SkyAnswers
 
-BOT_TOKEN = "8233085354:AAGXZ1GPyiDVW-wG3_Yj_DP_cuahx9PFrsw"
+BOT_TOKEN = "8233085354:AAGXZ1GPyiDVW-wG3_Yj_DP_cuahx9PFrsw"  # или os.getenv("BOT_TOKEN")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -39,33 +39,38 @@ async def handle_link(message: types.Message):
         return
     
     for task in answers_list:
-        header = f"<b>📝 Задание {task['task_number']}</b>"
+        header = f"<b>📝 Задание {task['task_number']}</b>\n"
         
         question = task['question'].strip()
-        if question:
-            suffix = " — выбери правильный ответ или запиши ответ" if not (
-                question.endswith(("?", "!")) or
-                any(w in question.lower() for w in ["выбери", "выбрать", "запиши", "напиши", "вычеркни", "соотнеси", "выполни"])
-            ) else ""
-            question_part = f"\n<i>{question}{suffix}</i>"
-        else:
-            question_part = ""
+        question_part = f"<i>{question}</i>\n" if question else ""
         
-        answers_part = ""
-        if task['answers']:
-            ans_list = [a.strip() for a in task['answers'] if a.strip()]
-            if any("File upload" in a for a in ans_list):
-                answers_part = "\n⚠️ <b>Требуется загрузка файла</b>"
-            elif len(ans_list) % 2 == 0 and all("→" not in a for a in ans_list):
-                answers_part = "\n" + "\n".join(f"<b>{ans_list[i]}</b> → {ans_list[i+1]}" for i in range(0, len(ans_list), 2))
-            elif "вычеркни" in question.lower():
-                answers_part = "\nВычеркнуть:\n" + "\n".join(f"❌ {ans}" for ans in ans_list)
-            else:
-                answers_part = "\n" + "\n".join(f"✅ {ans}" for ans in ans_list)
-        else:
-            answers_part = "\nНет ответа"
+        ans_list = [a.strip() for a in task['answers'] if a.strip()]
         
-        full_text = header + question_part + answers_part + f"\n\n<i>Получено за {elapsed} сек.</i>"
+        if not ans_list:
+            answers_part = "Нет ответа\n"
+        elif any("File upload" in a for a in ans_list):
+            answers_part = "⚠️ <b>Требуется загрузка файла</b>\n"
+        elif len(ans_list) % 2 == 0 and all("→" not in a and " - " not in a for a in ans_list):
+            # Соотнесение пар
+            answers_part = "\n".join(f"<b>{ans_list[i]}</b> → {ans_list[i+1]}" for i in range(0, len(ans_list), 2)) + "\n"
+        elif any("→" in a or " - " in a for a in ans_list):
+            # Уже готовые пары
+            answers_part = "\n".join(ans_list) + "\n"
+        elif "вычеркни" in question.lower():
+            answers_part = "Вычеркнуть:\n" + "\n".join(f"❌ {ans}" for ans in ans_list) + "\n"
+        else:
+            # Только правильные ответы (без "слово → слово")
+            clean_answers = []
+            for ans in ans_list:
+                if "→" in ans:
+                    clean_answers.append(ans.split("→", 1)[1].strip())
+                elif " - " in ans:
+                    clean_answers.append(ans.split(" - ", 1)[1].strip())
+                else:
+                    clean_answers.append(ans)
+            answers_part = "\n".join(f"✅ {ans}" for ans in clean_answers) + "\n"
+        
+        full_text = header + question_part + answers_part + f"<i>Получено за {elapsed} сек.</i>"
         await message.answer(full_text, parse_mode="HTML")
         await asyncio.sleep(0.3)
 
