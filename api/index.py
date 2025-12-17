@@ -1,15 +1,15 @@
 import os
+import time
 import asyncio
 from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
 from aiogram.types import Update
 from answer_module import SkyAnswers
-import time
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN not set")
+    raise ValueError("BOT_TOKEN environment variable is required")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -47,7 +47,10 @@ async def handle_link(message: types.Message):
         
         question = task['question'].strip()
         if question:
-            suffix = " — выбери правильный ответ или запиши ответ" if not (question.endswith("?") or question.endswith("!") or any(word in question.lower() for word in ["выбери", "выбрать", "запиши", "напиши", "вычеркни", "соотнеси", "выполни"])) else ""
+            suffix = ""
+            if not (question.endswith("?") or question.endswith("!") or 
+                    any(w in question.lower() for w in ["выбери", "выбрать", "запиши", "напиши", "вычеркни", "соотнеси", "выполни"])):
+                suffix = " — выбери правильный ответ или запиши ответ"
             question_part = f"\n<i>{question}{suffix}</i>"
         else:
             question_part = ""
@@ -55,10 +58,14 @@ async def handle_link(message: types.Message):
         answers_part = ""
         if task['answers']:
             ans_list = [a.strip() for a in task['answers'] if a.strip()]
+            
             if any("File upload" in a for a in ans_list):
                 answers_part = "\n⚠️ <b>Требуется загрузка файла</b>"
             elif len(ans_list) % 2 == 0 and all("→" not in a for a in ans_list):
-                answers_part = "\n" + "\n".join(f"<b>{ans_list[i]}</b> → {ans_list[i+1]}" for i in range(0, len(ans_list)-1, 2))
+                answers_part = "\n" + "\n".join(
+                    f"<b>{ans_list[i]}</b> → {ans_list[i+1]}" 
+                    for i in range(0, len(ans_list)-1, 2)
+                )
             elif "вычеркни" in question.lower():
                 answers_part = "\nВычеркнуть:\n" + "\n".join(f"❌ {ans}" for ans in ans_list)
             else:
@@ -72,8 +79,13 @@ async def handle_link(message: types.Message):
 
 app = FastAPI()
 
+@app.get("/")
+async def root():
+    return {"message": "Skysmart bot is running"}
+
 @app.post("/")
 async def webhook(request: Request):
-    update = Update.model_validate(await request.json(), context={"bot": bot})
+    update_dict = await request.json()
+    update = Update.model_validate(update_dict, context={"bot": bot})
     await dp.feed_update(bot=bot, update=update)
     return {"ok": True}
