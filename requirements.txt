@@ -1,4 +1,5 @@
 aiogram==3.*
+fastapi
 aiohttp
 beautifulsoup4
 user-agent
