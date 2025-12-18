@@ -7,6 +7,7 @@ from aiogram.filters import CommandStart
 from answer_module import SkyAnswers
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8233085354:AAGXZ1GPyiDVW-wG3_Yj_DP_cuahx9PFrsw")
+
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
@@ -44,14 +45,14 @@ async def handle(message: types.Message):
         if task['question']:
             header += f"\n<i>{task['question']}</i>"
 
-        answers_text = "\n".join(task['formatted_answers'])
+        text = task['formatted_text']
 
         await message.answer(
-            f"{header}\n\n{answers_text}\n\n<i>⚡ {elapsed}s</i>",
+            f"{header}\n\n{text}\n\n<i>⚡ {elapsed}s</i>",
             parse_mode="HTML",
             disable_web_page_preview=True
         )
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.3)
 
 async def main():
     await dp.start_polling(bot)
