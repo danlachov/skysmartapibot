@@ -44,7 +44,7 @@ class SkysmartAPIClient:
         async with self.session.post(url_room, headers=headers, json=payload) as resp:
             if resp.status == 200:
                 data = await resp.json()
-                return data['meta']['stepUuids']
+                return data.get('meta', {}).get('stepUuids', [])
             return []
 
     async def get_task_html(self, uuid):
@@ -52,7 +52,7 @@ class SkysmartAPIClient:
         async with self.session.get(f"{url_steps}{uuid}", headers=headers) as resp:
             if resp.status == 200:
                 data = await resp.json()
-                return data['content']
+                return data.get('content', '')
             return ""
 
 class SkyAnswers:
@@ -62,129 +62,149 @@ class SkyAnswers:
     @staticmethod
     def extract_question(soup):
         instr = soup.find("vim-instruction")
-        if instr and instr.text.strip():
-            return clean_text(instr.text)
-        # Fallback: clean main text
-        exclude = ['vim-test-item', 'vim-input-answers', 'vim-select-item', 'math-input-answer', 'vim-strike-out-item']
-        for tag in soup.find_all(exclude):
+        if instr and instr.get_text(strip=True):
+            return clean_text(instr.get_text())
+        # Fallback: clean text excluding answer elements
+        exclude_tags = ['vim-test-item', 'vim-select-item', 'vim-input-answers', 'math-input-answer',
+                        'vim-strike-out-item', 'vim-dnd-text-drag', 'vim-dnd-text-drop']
+        for tag in soup.find_all(exclude_tags):
             tag.decompose()
         text = soup.get_text(separator=" ")
-        return re.sub(r'\s+', ' ', text.strip())[:500]
+        return clean_text(text)[:600]
 
     @staticmethod
-    def parse_answers(soup):
-        answers = []
-        q_lower = soup.get_text().lower()
-
-        # Multiple choice
-        for item in soup.find_all('vim-test-item', attrs={'correct': 'true'}):
-            answers.append(item.get_text(strip=True))
-
-        # Select correct
-        for item in soup.find_all('vim-select-item', attrs={'correct': 'true'}):
-            answers.append(item.get_text(strip=True))
-
-        # Input fills
-        for inp in soup.find_all('vim-input-answers'):
-            for item in inp.find_all('vim-input-item'):
-                answers.append(item.get_text(strip=True))
-
-        # Math
-        for math in soup.find_all('math-input-answer'):
-            answers.append(math.get_text(strip=True))
-
-        # Strike out
-        if "вычеркни" in q_lower or "cross out" in q_lower:
-            for item in soup.find_all('vim-strike-out-item', attrs={'striked': 'true'}):
-                answers.append(item.get_text(strip=True))
-
-        # Drag and drop text
-        for drop in soup.find_all('vim-dnd-text-drop'):
-            drag_ids = drop.get('drag-ids', '').split(',')
-            for drag_id in drag_ids:
-                drag = soup.find('vim-dnd-text-drag', attrs={'answer-id': drag_id.strip()})
-                if drag:
-                    left = clean_text(drop.get_text())
-                    right = clean_text(drag.get_text())
-                    answers.append(f"{left} → {right}" if left else right)
-
-        # Image matching / dnd images
+    def parse_matching_images(soup):
+        lines = []
         for drag in soup.find_all(['vim-dnd-image-drag', 'vim-dnd-image-set-drag']):
             answer_id = drag.get('answer-id')
+            text = clean_text(drag.get_text())
+            if not text:
+                continue
+            img_src = ""
+            img_tag = drag.find('img')
+            if img_tag:
+                img_src = img_tag.get('src', '')
             for drop in soup.find_all(['vim-dnd-image-drop', 'vim-dnd-image-set-drop']):
                 drag_ids = drop.get('drag-ids', '').split(',')
                 if answer_id in [d.strip() for d in drag_ids]:
-                    img = drop.get('image') or drop.img.get('src', '') if drop.img else ''
-                    desc = clean_text(drop.get_text()) or "Image"
-                    text = clean_text(drag.get_text())
-                    answers.append(f"{desc} → {text}" if img or desc else text)
+                    desc = "Image"
+                    drop_img = drop.find('img')
+                    if drop_img:
+                        src = drop_img.get('src', '')
+                        if src:
+                            desc = f"[Image: {src}]"
+                    lines.append(f"{desc} → {text}")
+        return "\n".join(lines) or None
 
-        # Groups / tables
+    @staticmethod
+    def parse_dnd_text(soup):
+        lines = []
+        for drop in soup.find_all('vim-dnd-text-drop'):
+            drag_ids = drop.get('drag-ids', '').split(',')
+            left = clean_text(drop.get_text()) or "_____"
+            for drag_id in drag_ids:
+                drag = soup.find('vim-dnd-text-drag', attrs={'answer-id': drag_id.strip()})
+                if drag:
+                    right = clean_text(drag.get_text())
+                    lines.append(f"{left} → {right}")
+        return "\n".join(lines) or None
+
+    @staticmethod
+    def parse_groups_table(soup):
+        lines = []
         for row in soup.find_all('vim-groups-row'):
             for item in row.find_all('vim-groups-item'):
                 encoded = item.get('text')
                 if encoded:
                     try:
                         decoded = base64.b64decode(encoded).decode('utf-8')
-                        answers.append(decoded)
+                        lines.append(decoded)
                     except:
                         pass
-
-        # Image choices
-        for item in soup.find_all('vim-test-image-item', attrs={'correct': 'true'}):
-            text = clean_text(item.get_text())
-            img = item.find('img')
-            src = img.get('src', '') if img else ''
-            answers.append(f"{text} (Image: {src})" if src else text)
-
-        # True/False/Not stated detection
-        if any(x in q_lower for x in ["true", "false", "not stated", "1", "2", "3"]):
-            statements = []
-            for div in soup.find_all('div'):
-                t = clean_text(div.text)
-                if t and (t[0].upper() in "ABCDEFG" and "." in t):
-                    statements.append(t)
-            if statements:
-                answers = [f"{s.split('.',1)[0]}. → {a}" for s, a in zip(statements, answers)]
-
-        return answers or ["No answers found"]
+        return "\n".join(lines) or None
 
     @staticmethod
-    def format_answers(raw_answers, soup):
-        q_lower = soup.get_text().lower()
-        formatted = []
+    def parse_strike_out(soup):
+        return "\n".join(f"❌ ~~{clean_text(item.get_text())}~~"
+                         for item in soup.find_all('vim-strike-out-item', attrs={'striked': 'true'}))
 
-        if "вычеркни" in q_lower or "cross out" in q_lower:
-            for a in raw_answers:
-                formatted.append(f"❌ ~~{a}~~")
-        elif "match" in q_lower or "соотнес" in q_lower:
-            for a in raw_answers:
-                formatted.append(f"✅ {a}")
-        else:
-            for a in raw_answers:
-                formatted.append(f"✅ {a}")
+    @staticmethod
+    def parse_multiple_choice(soup):
+        items = soup.find_all(['vim-test-item', 'vim-select-item', 'vim-test-image-item'], attrs={'correct': 'true'})
+        lines = []
+        for item in items:
+            text = clean_text(item.get_text())
+            img = item.find('img')
+            if img:
+                src = img.get('src', '')
+                text = f"{text} [Image: {src}]" if src else text
+            lines.append(f"✅ {text}")
+        return "\n".join(lines) or None
 
-        return formatted or ["❌ Нет правильных ответов"]
+    @staticmethod
+    def parse_inputs(soup):
+        lines = []
+        for container in soup.find_all(['vim-input-answers', 'math-input-answer']):
+            for item in container.find_all(['vim-input-item', True]):
+                text = clean_text(item.get_text())
+                if text:
+                    lines.append(text)
+        return "\n".join(lines) or None
+
+    @staticmethod
+    def parse_true_false(soup):
+        statements = []
+        answers = []
+        # Collect correct answers first
+        for item in soup.find_all('vim-test-item', attrs={'correct': 'true'}):
+            answers.append(item.get_text(strip=True))
+        # Find statements (usually in separate divs with letters)
+        for div in soup.find_all('div'):
+            text = clean_text(div.get_text())
+            if len(text) > 10 and text[0] in "ABCDE" and text[1] == ".":
+                statements.append(text)
+        if len(statements) == len(answers):
+            return "\n".join(f"{s} → {a}" for s, a in zip(statements, answers))
+        return None
 
     async def get_answers(self):
         answers_list = []
         client = SkysmartAPIClient()
         try:
             uuids = await client.get_room(self.task_hash)
-            html_list = await asyncio.gather(*(client.get_task_html(u) for u in uuids))
+            htmls = await asyncio.gather(*[client.get_task_html(u) for u in uuids])
 
-            for idx, html in enumerate(html_list):
+            for idx, html in enumerate(htmls):
                 if not html:
                     continue
                 soup = BeautifulSoup(html, 'html.parser')
                 question = self.extract_question(soup)
-                raw_ans = self.parse_answers(soup)
-                formatted = self.format_answers(raw_ans, soup)
+
+                formatted = None
+                # Priority order
+                if soup.find(['vim-dnd-image-drag', 'vim-dnd-image-set-drag']):
+                    formatted = self.parse_matching_images(soup)
+                elif soup.find('vim-dnd-text-drop'):
+                    formatted = self.parse_dnd_text(soup)
+                elif soup.find('vim-groups-row'):
+                    formatted = self.parse_groups_table(soup)
+                elif soup.find('vim-strike-out-item'):
+                    formatted = self.parse_strike_out(soup)
+                elif soup.find('vim-test-item', attrs={'correct': 'true'}) or soup.find('vim-select-item', attrs={'correct': 'true'}):
+                    tf = self.parse_true_false(soup)
+                    formatted = tf or self.parse_multiple_choice(soup)
+                else:
+                    inputs = self.parse_inputs(soup)
+                    if inputs:
+                        formatted = inputs
+
+                if not formatted:
+                    formatted = "Ответы не распознаны"
 
                 answers_list.append({
                     'task_number': idx + 1,
                     'question': question,
-                    'formatted_answers': formatted
+                    'formatted_text': formatted
                 })
         finally:
             await client.close()
