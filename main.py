@@ -7,7 +7,6 @@ from aiogram.filters import CommandStart
 from answer_module import SkyAnswers
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8233085354:AAGXZ1GPyiDVW-wG3_Yj_DP_cuahx9PFrsw")
-
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
